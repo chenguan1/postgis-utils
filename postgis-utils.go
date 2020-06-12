@@ -101,6 +101,8 @@ FROM pg_class as c,pg_attribute as a where c.relname = '%v' and a.attrelid = c.o
 		}
 	}
 
+	meta.KeyColumn = "gid"
+
 	return meta, nil
 }
 
@@ -288,7 +290,7 @@ func FeatureInsert(db *gorm.DB, tableName, featureGeojson string) error {
 	setvalue := ""
 	properties := map[string]interface{}(feature.Properties)
 	for _, key := range metadata.Fields.Keys() {
-		if strings.ToLower(key) == "id" || strings.ToLower(key) == "gid" {
+		if key == metadata.KeyColumn {
 			continue
 		}
 		if v, ok := properties[key]; ok{

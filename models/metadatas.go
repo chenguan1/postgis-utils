@@ -4,6 +4,7 @@ package models
 type Metadatas struct {
 	TableName    string
 	Fields       Fields
+	KeyColumn    string
 	Geotype      string
 	GeoColumn    string
 	GeoSRS       string
