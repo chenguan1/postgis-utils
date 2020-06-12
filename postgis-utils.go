@@ -3,6 +3,8 @@ package postgis_utils
 import (
 	"fmt"
 	"github.com/jinzhu/gorm"
+	"github.com/paulmach/orb/encoding/wkt"
+	"github.com/paulmach/orb/geojson"
 	"postgis-utils/models"
 	"strconv"
 	"strings"
@@ -224,8 +226,8 @@ func QueryFiled(db *gorm.DB, tableName, fieldName string, value interface{}, op 
 // Fuzzy query
 func QueryFuzzy(db *gorm.DB, tableName string, fields []string, keyword string) ([]string, error) {
 	conditions := ``
-	for i, v := range fields{
-		conditions = conditions + fmt.Sprintf(`"%v" like '%v' `, v, "%" + keyword + "%")
+	for i, v := range fields {
+		conditions = conditions + fmt.Sprintf(`"%v" like '%v' `, v, "%"+keyword+"%")
 		if i != len(fields)-1 {
 			conditions = conditions + "or "
 		}
@@ -256,11 +258,57 @@ func QueryFuzzy(db *gorm.DB, tableName string, fields []string, keyword string) 
 
 // Feature delete
 func FeatureDelete(db *gorm.DB, tableName, idFieldName string, idValue interface{}) error {
+	sqlstr := fmt.Sprintf(`delete from "%v" where "%v" = '%v'`, tableName, idFieldName, idValue)
+	err := db.Exec(sqlstr).Error
+	if err != nil {
+		return fmt.Errorf("FeatureDelete failed: %v", err)
+	}
+
 	return nil
 }
 
 // Feature insert
 func FeatureInsert(db *gorm.DB, tableName, featureGeojson string) error {
+	feature, err := geojson.UnmarshalFeature([]byte(featureGeojson))
+	if err != nil {
+		return fmt.Errorf("FeatureInsert unmarshal geojson failed: %v", err)
+	}
+
+	// metadata
+	metadata, err := ReadMetadatas(db, tableName)
+	if err != nil {
+		return fmt.Errorf("FeatureInsert readmatadatas failed: %v", err)
+	}
+
+	// => wkt
+	wktstr := wkt.MarshalString(feature.Geometry)
+
+	// propertis
+	setfiled := ""
+	setvalue := ""
+	properties := map[string]interface{}(feature.Properties)
+	for _, key := range metadata.Fields.Keys() {
+		if strings.ToLower(key) == "id" || strings.ToLower(key) == "gid" {
+			continue
+		}
+		if v, ok := properties[key]; ok{
+			setfiled = setfiled + key + ","
+			setvalue = setvalue + fmt.Sprintf("'%v',", v)
+		}
+	}
+
+	setfiled = setfiled + metadata.GeoColumn
+	setvalue = setvalue + fmt.Sprintf("st_geomfromtext('%v',%v)", wktstr, metadata.GeoSRS)
+
+	sqlfmt := `insert into "%s" (%s) values (%s)`
+	sqlstr := fmt.Sprintf(sqlfmt, tableName, setfiled, setvalue)
+
+	//fmt.Println(sqlstr)
+
+	if err = db.Exec(sqlstr).Error; err != nil{
+		return fmt.Errorf("FeatureInsert insert feature failed: %v", err)
+	}
+
 	return nil
 }
 

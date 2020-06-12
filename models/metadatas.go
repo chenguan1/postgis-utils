@@ -10,4 +10,3 @@ type Metadatas struct {
 	Extent       [4]float64
 	FeatureCount int
 }
-
