@@ -26,7 +26,7 @@ func TestReadMetadatas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Printf("%v", meta.Extent)
+	fmt.Println(meta.GeoSRS)
 
 }
 
@@ -197,4 +197,24 @@ func TestFeatureUpdate(t *testing.T) {
 		t.Error(err)
 		return
 	}
+}
+
+func TestGenerateMVT(t *testing.T) {
+	conn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		"127.0.0.1", "5432", "postgres", "111111", "dev")
+
+	db, err := gorm.Open("postgres", conn)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	defer db.Close()
+
+	mvt, err := GenerateMVT(db, "5ufdxvmgr", "traffics", []string{}, 0, 0, 0)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	ioutil.WriteFile("./data/0_0_0.mvt", mvt, os.ModePerm)
 }

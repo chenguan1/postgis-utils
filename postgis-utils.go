@@ -367,3 +367,66 @@ func FeatureUpdate(db *gorm.DB, tableName string, featureId interface{}, feature
 
 	return nil
 }
+
+// Generate MVT(Mapbox Vector Tile), vector table only surport epsg:4326 and epsg:3857
+func GenerateMVT(db *gorm.DB, tableName, layerName string, fields []string, zoom, x, y int) ([]byte, error) {
+	var err error
+	var metadata *models.Metadatas
+	if fields == nil || len(fields) == 0 {
+		metadata, err = ReadMetadatas(db, tableName)
+		if err != nil {
+			return nil, fmt.Errorf("GenerateMVT readmatadatas failed: %v", err)
+		}
+		metaFields := metadata.Fields.Keys()
+
+		fields = make([]string, 0, len(metaFields)+2)
+		for _,v := range metaFields{
+			if v == metadata.GeoColumn{ // skip geom column
+				continue
+			}
+			fields = append(fields, v)
+		}
+	}
+
+	// fields remove geom
+	for i,v := range fields{
+		if v == "geom"{ // skip geom
+			fields = append(fields[:i], fields[i+1:]...)
+			break
+		}
+	}
+
+	// to string
+	flds := `"` + strings.Join(fields, `","`) + `"`
+
+	//fmt.Println(zoom,x,y)
+
+	minx, miny := TileUl_4326(zoom, x, y)
+	maxx, maxy := TileUl_4326(zoom, x+1, y+1)
+
+	if layerName == "" {
+		layerName = tableName
+	}
+
+	sqltmp := `
+WITH mvtgeom AS
+	(SELECT ST_AsMVTGeom(ST_Transform(%v,3857),ST_TileEnvelope(%v,%v,%v)) AS geom, %v
+	FROM "%v" 
+	WHERE ST_Intersects(%v,ST_MakeEnvelope(%v,%v,%v,%v, 4326)))
+	SELECT ST_AsMvt(mvtgeom.*,'%v') AS mvt
+	FROM mvtgeom
+`
+
+	sqlstr := fmt.Sprintf(sqltmp, "geom", zoom, x, y, flds, tableName, "geom", minx, miny, maxx, maxy, layerName)
+	//fmt.Println(sqlstr)
+
+	var gi struct{
+		Mvt []byte
+	}
+
+	err = db.Raw(sqlstr).Scan(&gi).Error
+	if err != nil {
+		return nil, fmt.Errorf("GenerateMVT query tile failed: %v", err)
+	}
+	return gi.Mvt, nil
+}
