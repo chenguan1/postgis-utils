@@ -26,7 +26,7 @@ func TestReadMetadatas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Printf("%#v", meta)
+	fmt.Printf("%v", meta.Extent)
 
 }
 
@@ -131,7 +131,7 @@ func TestQueryFuzzy(t *testing.T) {
 	}
 	defer db.Close()
 
-	geojsons, err := QueryFuzzy(db, "5ufdxvmgr", []string{"fclass", "name"}, "crossing")
+	geojsons, err := QueryFuzzy(db, "5ufdxvmgr", "crossing")
 	if err != nil {
 		t.Error(err)
 		return
@@ -153,14 +153,13 @@ func TestFeatureDelete(t *testing.T) {
 	}
 	defer db.Close()
 
-	err = FeatureDelete(db, "5ufdxvmgr", "gid", "3")
+	err = FeatureDelete(db, "5ufdxvmgr", "3")
 	if err != nil {
 		t.Error(err)
 		return
 	}
 
 }
-
 
 func TestFeatureInsert(t *testing.T) {
 	conn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
@@ -175,6 +174,25 @@ func TestFeatureInsert(t *testing.T) {
 
 	fg := `{"type": "Feature", "geometry": {"type":"MultiPoint","coordinates":[[118.7790457,32.0601774]]}, "properties": {"gid": 293, "osm_id": "32918369", "code": 5201, "fclass": "traffic_signals", "name": "gray"}}`
 	err = FeatureInsert(db, "5ufdxvmgr", fg)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+}
+
+func TestFeatureUpdate(t *testing.T) {
+	conn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		"127.0.0.1", "5432", "postgres", "111111", "dev")
+
+	db, err := gorm.Open("postgres", conn)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	defer db.Close()
+
+	fg := `{"type": "Feature", "geometry": {"type":"MultiPoint","coordinates":[[118.7790457,32.0601774]]}, "properties": {"gid": 10, "osm_id": "32918369", "code": 5201, "fclass": "traffic_signals", "name": "gray"}}`
+	err = FeatureUpdate(db, "5ufdxvmgr", 10, fg)
 	if err != nil {
 		t.Error(err)
 		return

@@ -108,13 +108,13 @@ FROM pg_class as c,pg_attribute as a where c.relname = '%v' and a.attrelid = c.o
 
 // query circle, return geojson
 func QueryCircel(db *gorm.DB, tableName string, x, y, r float64) ([]string, error) {
-	sqlstr := fmt.Sprintf(`select st_asgeojson(t.*) as geojson
-		from "%v" as t 
-		where ST_DWithin(
-			ST_Transform(ST_GeomFromText('POINT(%v %v)',4326),26986),
-			ST_Transform(t.geom,26986),
-			%v
-		)`, tableName, x, y, r)
+	sqlstr := fmt.Sprintf(`
+select st_asgeojson(t.*) as geojson
+from "%v" as t 
+where ST_DWithin(
+ST_Transform(ST_GeomFromText('POINT(%v %v)',4326),26986),
+ST_Transform(t.geom,26986),
+%v)`, tableName, x, y, r)
 
 	type GJson struct {
 		Geojson []byte
@@ -137,11 +137,12 @@ func QueryCircel(db *gorm.DB, tableName string, x, y, r float64) ([]string, erro
 
 // query rectangle
 func QueryRect(db *gorm.DB, tableName string, minx, miny, maxx, maxy float64) ([]string, error) {
-	sqlstr := fmt.Sprintf(`select st_asgeojson(t.*) as geojson 
+	sqlstr := fmt.Sprintf(
+		`
+select st_asgeojson(t.*) as geojson 
 from "%v" as t 
-where ST_Intersects(t.geom, 
- 'SRID=4326;POLYGON((%v %v,%v %v,%v %v,%v %v))')
-`, tableName, minx, miny, minx, maxy, maxx, maxy, minx, miny)
+where ST_Intersects(t.geom, 'SRID=4326;POLYGON((%v %v,%v %v,%v %v,%v %v))')`,
+		tableName, minx, miny, minx, maxy, maxx, maxy, minx, miny)
 
 	type GJson struct {
 		Geojson []byte
@@ -178,8 +179,9 @@ func QueryPolygon(db *gorm.DB, tableName string, pts []float64) ([]string, error
 		}
 	}
 
-	sqlstr := fmt.Sprintf(`select st_asgeojson(t.*) as geojson from "%v" as t
-where ST_Intersects(t.geom,'SRID=4326;POLYGON((%v))')`, tableName, ptlist)
+	sqlstr := fmt.Sprintf(
+		`select st_asgeojson(t.*) as geojson from "%v" as t where ST_Intersects(t.geom,'SRID=4326;POLYGON((%v))')`,
+		tableName, ptlist)
 
 	type GJson struct {
 		Geojson []byte
@@ -202,9 +204,7 @@ where ST_Intersects(t.geom,'SRID=4326;POLYGON((%v))')`, tableName, ptlist)
 
 // query by filed value
 func QueryFiled(db *gorm.DB, tableName, fieldName string, value interface{}, op string) ([]string, error) {
-	sqlstr := fmt.Sprintf(`select st_asgeojson(t.*) as geojson
-		from "%v" as t 
-		where "%v" %v '%v'`, tableName, fieldName, op, value)
+	sqlstr := fmt.Sprintf(`select st_asgeojson(t.*) as geojson from "%v" as t where "%v" %v '%v'`, tableName, fieldName, op, value)
 
 	type GJson struct {
 		Geojson []byte
@@ -226,18 +226,28 @@ func QueryFiled(db *gorm.DB, tableName, fieldName string, value interface{}, op 
 }
 
 // Fuzzy query
-func QueryFuzzy(db *gorm.DB, tableName string, fields []string, keyword string) ([]string, error) {
+func QueryFuzzy(db *gorm.DB, tableName string, keyword string) ([]string, error) {
+	// metadata
+	metadata, err := ReadMetadatas(db, tableName)
+	if err != nil {
+		return nil, fmt.Errorf("QueryFuzzy readmatadatas failed: %v", err)
+	}
+
+	keys := metadata.Fields.Keys()
 	conditions := ``
-	for i, v := range fields {
-		conditions = conditions + fmt.Sprintf(`"%v" like '%v' `, v, "%"+keyword+"%")
-		if i != len(fields)-1 {
-			conditions = conditions + "or "
+	for _, k := range keys {
+		fieldType, _ := metadata.Fields.Get(k)
+		if strings.Contains(fieldType, "character") {
+			if len(conditions) > 0 {
+				conditions = conditions + "or "
+			}
+			conditions = conditions + fmt.Sprintf(`"%v" like '%v' `, k, "%"+keyword+"%")
 		}
 	}
 
-	sqlstr := fmt.Sprintf(`select st_asgeojson(t.*) as geojson
-		from "%v" as t 
-		where %v`, tableName, conditions)
+	sqlstr := fmt.Sprintf(`select st_asgeojson(t.*) as geojson from "%v" as t where %v`, tableName, conditions)
+
+	//fmt.Println(sqlstr)
 
 	type GJson struct {
 		Geojson []byte
@@ -245,7 +255,7 @@ func QueryFuzzy(db *gorm.DB, tableName string, fields []string, keyword string) 
 
 	gjs := make([]GJson, 0)
 
-	err := db.Raw(sqlstr).Scan(&gjs).Error
+	err = db.Raw(sqlstr).Scan(&gjs).Error
 	if err != nil {
 		return nil, fmt.Errorf("QueryFuzzy query db failed: %v", err)
 	}
@@ -259,9 +269,15 @@ func QueryFuzzy(db *gorm.DB, tableName string, fields []string, keyword string) 
 }
 
 // Feature delete
-func FeatureDelete(db *gorm.DB, tableName, idFieldName string, idValue interface{}) error {
-	sqlstr := fmt.Sprintf(`delete from "%v" where "%v" = '%v'`, tableName, idFieldName, idValue)
-	err := db.Exec(sqlstr).Error
+func FeatureDelete(db *gorm.DB, tableName string, featureId interface{}) error {
+	// metadata
+	metadata, err := ReadMetadatas(db, tableName)
+	if err != nil {
+		return fmt.Errorf("FeatureDelete readmatadatas failed: %v", err)
+	}
+
+	sqlstr := fmt.Sprintf(`delete from "%v" where "%v" = '%v'`, tableName, metadata.KeyColumn, featureId)
+	err = db.Exec(sqlstr).Error
 	if err != nil {
 		return fmt.Errorf("FeatureDelete failed: %v", err)
 	}
@@ -293,7 +309,7 @@ func FeatureInsert(db *gorm.DB, tableName, featureGeojson string) error {
 		if key == metadata.KeyColumn {
 			continue
 		}
-		if v, ok := properties[key]; ok{
+		if v, ok := properties[key]; ok {
 			setfiled = setfiled + key + ","
 			setvalue = setvalue + fmt.Sprintf("'%v',", v)
 		}
@@ -307,7 +323,7 @@ func FeatureInsert(db *gorm.DB, tableName, featureGeojson string) error {
 
 	//fmt.Println(sqlstr)
 
-	if err = db.Exec(sqlstr).Error; err != nil{
+	if err = db.Exec(sqlstr).Error; err != nil {
 		return fmt.Errorf("FeatureInsert insert feature failed: %v", err)
 	}
 
@@ -315,6 +331,39 @@ func FeatureInsert(db *gorm.DB, tableName, featureGeojson string) error {
 }
 
 // Feature update
-func FeatureUpdate(db *gorm.DB, tableName, idFieldName string, idValue interface{}, featureGeojson string) error {
+func FeatureUpdate(db *gorm.DB, tableName string, featureId interface{}, featureGeojson string) error {
+	feature, err := geojson.UnmarshalFeature([]byte(featureGeojson))
+	if err != nil {
+		return fmt.Errorf("FeatureUpdate unmarshal geojson failed: %v", err)
+	}
+
+	// metadata
+	metadata, err := ReadMetadatas(db, tableName)
+	if err != nil {
+		return fmt.Errorf("FeatureUpdate readmatadatas failed: %v", err)
+	}
+
+	// => wkt
+	wktstr := wkt.MarshalString(feature.Geometry)
+
+	// propertis
+	setvalue := ""
+	properties := map[string]interface{}(feature.Properties)
+	for _, key := range metadata.Fields.Keys() {
+		if v, ok := properties[key]; ok {
+			setvalue = setvalue + fmt.Sprintf(`"%v"='%v',`, key, v)
+		}
+	}
+
+	setvalue = setvalue + fmt.Sprintf(`"%v" = st_geomfromtext('%v',%v)`, metadata.GeoColumn, wktstr, metadata.GeoSRS)
+
+	sqlstr := fmt.Sprintf(`update "%s" set %s where %s = %v`, tableName, setvalue, metadata.KeyColumn, featureId)
+
+	//fmt.Println(sqlstr)
+
+	if err = db.Exec(sqlstr).Error; err != nil {
+		return fmt.Errorf("FeatureUpdate update feature failed: %v", err)
+	}
+
 	return nil
 }
