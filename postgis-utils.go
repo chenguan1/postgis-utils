@@ -245,6 +245,10 @@ func QueryFuzzy(db *gorm.DB, tableName string, keyword string) ([]string, error)
 		}
 	}
 
+	if len(conditions)==0{
+		return []string{}, nil
+	}
+
 	sqlstr := fmt.Sprintf(`select st_asgeojson(t.*) as geojson from "%v" as t where %v`, tableName, conditions)
 
 	//fmt.Println(sqlstr)
